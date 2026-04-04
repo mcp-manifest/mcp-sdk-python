@@ -9,6 +9,15 @@ from typing import Any
 
 
 @dataclass
+class McpManifestOptionsFrom:
+    """Dynamically resolve available config values from a local file."""
+    file: str = ""
+    """Path to a local JSON file. ~ is expanded to the user's home directory."""
+    path: str = ""
+    """JSONPath expression to extract values from the file."""
+
+
+@dataclass
 class McpManifestConfig:
     """A configuration parameter the server accepts."""
 
@@ -20,6 +29,8 @@ class McpManifestConfig:
     env_var: str | None = None
     arg: str | None = None
     prompt: str | None = None
+    options: list[str] = field(default_factory=list)
+    options_from: McpManifestOptionsFrom | None = None
 
 
 @dataclass
@@ -46,6 +57,7 @@ class McpManifestServer:
     repository: str | None = None
     license: str | None = None
     keywords: list[str] = field(default_factory=list)
+    icon: str | None = None
 
 
 @dataclass
@@ -98,6 +110,7 @@ class McpManifest:
             repository=server_data.get("repository"),
             license=server_data.get("license"),
             keywords=server_data.get("keywords", []),
+            icon=server_data.get("icon"),
         )
 
         install = [
@@ -121,6 +134,11 @@ class McpManifest:
                 env_var=c.get("env_var"),
                 arg=c.get("arg"),
                 prompt=c.get("prompt"),
+                options=c.get("options", []),
+                options_from=McpManifestOptionsFrom(
+                    file=c["options_from"]["file"],
+                    path=c["options_from"]["path"],
+                ) if c.get("options_from") else None,
             )
             for c in data.get("config", [])
         ]
