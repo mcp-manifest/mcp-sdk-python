@@ -1,4 +1,8 @@
-"""Dataclass models for the mcp-manifest.dev spec (v0.1)."""
+"""Dataclass models for the mcp-manifest.dev spec (v1.0).
+
+Security-related fields are documented inline; see the spec's THREAT-MODEL.md
+for the rationale behind each field.
+"""
 
 from __future__ import annotations
 
@@ -31,16 +35,23 @@ class McpManifestConfig:
     prompt: str | None = None
     options: list[str] = field(default_factory=list)
     options_from: McpManifestOptionsFrom | None = None
+    secret_target: str | None = None
+    """Intended recipient origin for secrets (e.g., 'api.openai.com'). REQUIRED when type='secret'. (T3)"""
+    secret_scope_url: str | None = None
+    """URL pattern this secret may be sent to. (T3)"""
 
 
 @dataclass
 class McpManifestInstall:
     """An installation method for the server."""
 
-    method: str  # dotnet-tool | npm | pip | cargo | binary | docker
+    method: str  # dotnet-tool | npm | pip | cargo | gem | prebuilt-binary | docker
     package: str
     command: str
-    source: str | None = None
+    registry: str | None = None
+    """Explicit registry origin URL. RECOMMENDED for non-default registries. (T2)"""
+    checksum: str | None = None
+    """SHA-256 checksum 'sha256:HEX'. REQUIRED when method='prebuilt-binary'. (T2)"""
     priority: int = 0
 
 
@@ -69,8 +80,23 @@ class McpManifestSettingsTemplate:
 
 
 @dataclass
+class McpManifestSignature:
+    """Cryptographic signature over the canonicalized manifest. (T1)
+
+    The signed payload is the manifest JSON with the `signature` field removed,
+    canonicalized via RFC 8785 (JCS), then signed with Ed25519.
+    """
+    alg: str = "Ed25519"
+    """Currently only 'Ed25519' is defined."""
+    key_id: str = ""
+    """Opaque identifier for the publisher's signing key."""
+    value: str = ""
+    """Base64url-encoded signature (no padding)."""
+
+
+@dataclass
 class McpManifest:
-    """Top-level MCP manifest object."""
+    """Top-level MCP manifest object (spec v1.0)."""
 
     version: str
     server: McpManifestServer
@@ -80,6 +106,14 @@ class McpManifest:
     config: list[McpManifestConfig] = field(default_factory=list)
     scopes: list[str] = field(default_factory=list)
     settings_template: McpManifestSettingsTemplate | None = None
+    update_policy: str | None = None
+    """How clients should handle updates: auto | manual | ask. Default 'manual'. (T4)"""
+    changelog_url: str | None = None
+    """URL to a human-readable changelog displayed during update prompts. (T4)"""
+    signature: McpManifestSignature | None = None
+    """Cryptographic publisher signature. (T1)"""
+    extensions: dict[str, Any] = field(default_factory=dict)
+    """Vendor extensions; keys MUST start with 'x-'. (T5)"""
 
     # --- Construction helpers ------------------------------------------------
 
@@ -118,7 +152,8 @@ class McpManifest:
                 method=i["method"],
                 package=i["package"],
                 command=i["command"],
-                source=i.get("source"),
+                registry=i.get("registry") or i.get("source"),  # accept legacy "source" for backward compat
+                checksum=i.get("checksum"),
                 priority=i.get("priority", 0),
             )
             for i in data["install"]
@@ -139,6 +174,8 @@ class McpManifest:
                     file=c["options_from"]["file"],
                     path=c["options_from"]["path"],
                 ) if c.get("options_from") else None,
+                secret_target=c.get("secret_target"),
+                secret_scope_url=c.get("secret_scope_url"),
             )
             for c in data.get("config", [])
         ]
@@ -151,6 +188,15 @@ class McpManifest:
                 args=st.get("args", []),
             )
 
+        signature = None
+        if "signature" in data:
+            sig = data["signature"]
+            signature = McpManifestSignature(
+                alg=sig.get("alg", "Ed25519"),
+                key_id=sig.get("key_id", ""),
+                value=sig.get("value", ""),
+            )
+
         return cls(
             version=data["version"],
             server=server,
@@ -160,4 +206,8 @@ class McpManifest:
             config=config,
             scopes=data.get("scopes", []),
             settings_template=settings_template,
+            update_policy=data.get("update_policy"),
+            changelog_url=data.get("changelog_url"),
+            signature=signature,
+            extensions=data.get("extensions", {}),
         )
